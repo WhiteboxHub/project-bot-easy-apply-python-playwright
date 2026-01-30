@@ -4,7 +4,7 @@
 
 ### Step 1: Install Python Dependencies
 ```bash
-cd "c:\Users\Adarsh Teja\Desktop\easy_apply_playwright\project-bot-easy-apply-python-playwright"
+cd "c:\Users\user_name\Desktop\easy_apply_playwright\project-bot-easy-apply-python-playwright"
 pip install -r requirements.txt
 ```
 
@@ -66,26 +66,6 @@ python main.py
 5. Bot will fill out forms
 6. **Bot will NOT submit** (dry run mode)
 7. You'll see a summary at the end
-
----
-
-## Going Live (Real Applications)
-
-⚠️ **Only after testing in dry run mode!**
-
-1. Edit `config.yaml`:
-   ```yaml
-   execution:
-     dry_run: false  # Change to false
-     max_applications_per_run: 3  # Start small!
-   ```
-
-2. Run the bot:
-   ```bash
-   python main.py
-   ```
-
-3. Monitor the first few applications carefully
 
 ---
 

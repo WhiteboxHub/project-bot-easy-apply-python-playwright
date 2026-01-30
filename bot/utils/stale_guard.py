@@ -1,4 +1,4 @@
-from playwright.async_api import TimeoutError as PlaywrightTimeoutError
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 import time
 from bot.utils.logger import logger
 from bot.utils.exceptions import NavigationException

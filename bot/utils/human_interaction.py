@@ -23,12 +23,12 @@ class HumanInteraction:
             points.append((x, y))
         return points
 
-    async def scroll_page(self):
+    def scroll_page(self):
         """
         Scrolls the window with natural stutter.
         """
-        total_height = await self.page.evaluate("() => document.body.scrollHeight")
-        current_pos = await self.page.evaluate("() => window.pageYOffset")
+        total_height = self.page.evaluate("() => document.body.scrollHeight")
+        current_pos = self.page.evaluate("() => window.pageYOffset")
         
         while current_pos < total_height:
             step = random.randint(300, 700)
@@ -38,22 +38,22 @@ class HumanInteraction:
             if random.random() < 0.1:
                 current_pos -= random.randint(50, 150)
             
-            await self.page.evaluate(f"window.scrollTo(0, {current_pos})")
-            await self.page.wait_for_timeout(random.randint(100, 400))
+            self.page.evaluate(f"window.scrollTo(0, {current_pos})")
+            time.sleep(random.uniform(0.1, 0.4))
             
             # Check if we hit bottom
-            new_height = await self.page.evaluate("() => document.body.scrollHeight")
+            new_height = self.page.evaluate("() => document.body.scrollHeight")
             if current_pos >= new_height:
                 break
             total_height = new_height
 
-    async def scroll_element(self, element):
+    def scroll_element(self, element):
         """
         Scrolls a specific element (like a job list container) with stutter.
         """
         try:
-            total_height = await element.evaluate("el => el.scrollHeight")
-            current_pos = await element.evaluate("el => el.scrollTop")
+            total_height = element.evaluate("el => el.scrollHeight")
+            current_pos = element.evaluate("el => el.scrollTop")
             
             target = current_pos + random.randint(300, 600)
             
@@ -61,14 +61,14 @@ class HumanInteraction:
             if random.random() < 0.1:
                 target -= random.randint(20, 100)
                 
-            await element.evaluate(f"el => el.scrollTo(0, {target})")
-            await self.page.wait_for_timeout(random.randint(200, 500))
+            element.evaluate(f"el => el.scrollTo(0, {target})")
+            time.sleep(random.uniform(0.2, 0.5))
             
             return target
         except Exception as e:
             logger.warning(f"Human scroll failed: {e}", step="human_scroll")
 
-    async def click(self, locator):
+    def click(self, locator):
         """
         Clicks with optional natural mouse movement.
         Playwright locator can be a string or Locator object.
@@ -82,14 +82,14 @@ class HumanInteraction:
             
             # Get element bounding box for natural movement
             try:
-                box = await element.bounding_box()
+                box = element.bounding_box()
                 if box:
                     # Move to a random point within the element
                     target_x = box['x'] + box['width'] * random.uniform(0.3, 0.7)
                     target_y = box['y'] + box['height'] * random.uniform(0.3, 0.7)
                     
                     # Get current mouse position (approximate)
-                    current_pos = await self.page.evaluate("""
+                    current_pos = self.page.evaluate("""
                         () => {
                             return { x: window.innerWidth / 2, y: window.innerHeight / 2 };
                         }
@@ -115,22 +115,22 @@ class HumanInteraction:
                     
                     # Move mouse along curve
                     for x, y in points:
-                        await self.page.mouse.move(x, y)
-                        await self.page.wait_for_timeout(random.randint(5, 15))
+                        self.page.mouse.move(x, y)
+                        time.sleep(random.uniform(0.005, 0.015))
                     
                     # Small delay before click
-                    await self.page.wait_for_timeout(random.randint(50, 150))
+                    time.sleep(random.uniform(0.05, 0.15))
             except:
                 pass  # If we can't get bounding box, just click normally
             
             # Click the element
-            await element.click()
+            element.click()
             
         except Exception as e:
             logger.warning(f"Click failed: {e}", step="click_error")
             raise
 
-    async def type_text(self, locator, text):
+    def type_text(self, locator, text):
         """
         Types text with random delays between keystrokes.
         """
@@ -140,11 +140,12 @@ class HumanInteraction:
             else:
                 element = locator
             
-            await element.click()
+            element.click()
             
             for char in text:
-                await element.press_sequentially(char, delay=random.randint(50, 200))
+                element.press_sequentially(char, delay=random.randint(50, 200))
                 
         except Exception as e:
             logger.warning(f"Typing failed: {e}", step="type_error")
             raise
+

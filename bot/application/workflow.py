@@ -4,6 +4,7 @@ import logging
 from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError
 
 from bot.application.form_filler import FormFiller
+from bot.application.smart_form_filler import SmartFormFiller
 from bot.persistence.store import Store
 from bot.utils.selectors import LOCATORS, get_locator
 from bot.utils.logger import logger
@@ -12,12 +13,19 @@ from bot.utils.human_interaction import HumanInteraction
 
 
 class Workflow:
-    def __init__(self, page: Page, uploads, blacklist_titles=None, execution_guard=None, dry_run=None, metrics=None):
+    def __init__(self, page: Page, uploads, blacklist_titles=None, execution_guard=None, dry_run=None, metrics=None, candidate_profile=None):
         self.page = page
         self.uploads = uploads
         self.blacklist_titles = blacklist_titles or []
         self.store = Store()
-        self.form_filler = FormFiller(self.page)
+        self.candidate_profile = candidate_profile
+        
+        # Use SmartFormFiller if candidate profile provided, otherwise old FormFiller
+        if candidate_profile:
+            self.form_filler = SmartFormFiller(self.page, candidate_profile)
+        else:
+            self.form_filler = FormFiller(self.page)
+            
         self.locator = LOCATORS
         self.execution_guard = execution_guard
         self.dry_run = dry_run
@@ -47,16 +55,24 @@ class Workflow:
             else:
                 string_easy = "* has Easy Apply Button"
                 logger.info("Clicking the EASY apply button", job_id=jobID, step="apply", event="click_apply")
-                button.click()
-                time.sleep(1)
-                self.form_filler.fill_out_fields(phone_number)
+                
+                try:
+                    button.click()
+                    logger.debug("Waiting for modal to open...", job_id=jobID, step="apply")
+                    time.sleep(2)  # Wait for modal to fully open
+                    
+                    # Form filling happens inside send_resume now
+                    result = self.send_resume(jobID)
 
-                result = self.send_resume(jobID)
-
-                if result:
-                    string_easy = "*Applied: Sent Resume"
-                else:
-                    string_easy = "*Did not apply: Failed to send Resume"
+                    if result:
+                        string_easy = "*Applied: Sent Resume"
+                    else:
+                        string_easy = "*Did not apply: Failed to send Resume"
+                        
+                except Exception as e:
+                    logger.error(f"Error during application: {e}", job_id=jobID, step="apply", exception=e)
+                    result = False
+                    string_easy = "*Error during application"
         elif "You applied on" in self.page.content():
             logger.info("You have already applied to this position.", job_id=jobID, step="apply", event="already_applied")
             string_easy = "* Already Applied"
@@ -70,29 +86,195 @@ class Workflow:
                    job_id=jobID, step="apply", event="summary")
 
         self.store.write_to_file(button, jobID, self.page.title(), result)
+        
+        # CRITICAL: Close any open modals before moving to next job
+        self.close_modal()
+        
         return result
+    
+    def close_modal(self):
+        """Close any open Easy Apply modals to prevent interference with next job"""
+        try:
+            # 1. Handle "Discard application?" confirmation modal (Priority)
+            # This often appears if we try to close the main modal with unsaved changes
+            if self.is_present(".artdeco-modal[role='alertdialog']") or self.is_present(".artdeco-modal-overlay"):
+                logger.debug("Potential discard/confirmation modal detected", step="cleanup")
+                
+                # Strategy A: Look for "Discard" button by text (most reliable)
+                try:
+                    discard_btn = self.page.get_by_text("Discard", exact=True).first
+                    if discard_btn.is_visible(timeout=1000):
+                        discard_btn.click()
+                        logger.info("Clicked 'Discard' text button", step="cleanup")
+                        time.sleep(1)
+                except:
+                    pass
+                
+                # Strategy B: Selectors
+                discard_selectors = [
+                    "button[data-test-dialog-primary-btn]",
+                    "button[data-control-name='discard_application_confirm_btn']"
+                ]
+                for sel in discard_selectors:
+                    try:
+                        btn = self.page.locator(sel).first
+                        if btn.is_visible(timeout=500):
+                            btn.click()
+                            logger.info("Clicked Discard button (selector)", step="cleanup")
+                            time.sleep(1)
+                            break
+                    except:
+                        continue
+
+            # 2. Close main Easy Apply modal
+            modal_selectors = [
+                "button[aria-label='Dismiss']",
+                "button[data-test-modal-close-btn]",
+                ".artdeco-modal__dismiss",
+                "button.artdeco-modal__dismiss"
+            ]
+            
+            modal_closed = False
+            for selector in modal_selectors:
+                try:
+                    close_btn = self.page.locator(selector).first
+                    if close_btn.count() > 0 and close_btn.is_visible(timeout=1000):
+                        close_btn.click()
+                        logger.debug("Clicked Close (X) button", step="cleanup")
+                        time.sleep(1)
+                        modal_closed = True
+                        
+                        # 3. Discard modal might appear AFTER clicking close
+                        if self.is_present(".artdeco-modal[role='alertdialog']") or self.is_present("text=Discard"):
+                            logger.info("Discard modal appeared after closing", step="cleanup")
+                            discard_btn = self.page.get_by_text("Discard", exact=True).first
+                            if discard_btn.is_visible(timeout=2000):
+                                discard_btn.click()
+                                logger.info("Clicked Discard (after close)", step="cleanup")
+                                time.sleep(1)
+                        return
+                except:
+                    continue
+            
+            # 4. Fallback: Press Escape
+            if not modal_closed:
+                self.page.keyboard.press("Escape")
+                logger.debug("Pressed Escape to close modal", step="cleanup")
+                time.sleep(1)
+                
+                # Check for discard modal again
+                if self.is_present("text=Discard"):
+                     self.page.get_by_text("Discard", exact=True).click()
+                     logger.info("Clicked Discard after Escape", step="cleanup")
+                     time.sleep(1)
+            
+        except Exception as e:
+            logger.debug(f"Modal cleanup attempt failed (might not be open): {e}", step="cleanup")
 
     @retry(max_attempts=3, delay=1)
     def get_job_page(self, jobID):
-        job = 'https://www.linkedin.com/jobs/view/' + str(jobID)
-        self.page.goto(job, wait_until="domcontentloaded")
+        """
+        Don't navigate to full job page - LinkedIn hides Easy Apply button there!
+        Instead, just ensure the job card is clicked to show preview panel on right.
+        The job card should already be clicked by search.py, so we just wait a bit.
+        """
+        import time
+        logger.debug(f"Waiting for job preview panel to load for job {jobID}", step="get_job_page")
+        time.sleep(0.5)  # Minimal wait - card already clicked in search.py
+        # Stay on search results page - Easy Apply button is in the preview panel!
 
     @retry(max_attempts=3, delay=1)
     def get_easy_apply_button(self):
         """
-        Find and return the Easy Apply button
+        Find and return the Easy Apply button in the preview panel
+        (NOT the full job page - LinkedIn hides it there!)
         """
         try:
+            # Wait for preview panel to load
+            import time
+            logger.debug("Waiting for preview panel with Easy Apply button...", step="get_button")
+            time.sleep(5)  # Wait for preview panel to fully load
+            
+            # Debug: Count all buttons on page
+            try:
+                all_buttons = self.page.locator("button").count()
+                logger.debug(f"Total buttons on page: {all_buttons}", step="get_button")
+            except:
+                pass
+            
+            # Try primary selector first (ID)
             button_selector = get_locator("easy_apply_button")
-            buttons = self.page.locator(button_selector).all()
+            logger.debug(f"Looking for Easy Apply button with selector: {button_selector}", step="get_button")
             
-            for button in buttons:
-                if "Easy Apply" in button.text_content():
-                    button.wait_for(state="visible", timeout=5000)
+            try:
+                # Wait for button to appear with longer timeout
+                self.page.wait_for_selector(button_selector, timeout=10000, state="visible")
+                buttons = self.page.locator(button_selector).all()
+                logger.debug(f"Primary selector found {len(buttons)} buttons", step="get_button")
+                
+                for button in buttons:
+                    try:
+                        text = button.text_content(timeout=2000)
+                        if text and "Easy Apply" in text:
+                            logger.debug(f"Found Easy Apply button: {text.strip()}", step="get_button")
+                            return button
+                    except:
+                        continue
+            except Exception as e:
+                logger.debug(f"Primary selector didn't find button: {e}", step="get_button")
+            
+            # Try fallback selector
+            fallback_selector = get_locator("easy_apply_button", use_fallback=True)
+            if fallback_selector and fallback_selector != button_selector:
+                logger.debug(f"Trying fallback selector: {fallback_selector}", step="get_button")
+                try:
+                    self.page.wait_for_selector(fallback_selector, timeout=10000, state="visible")
+                    buttons = self.page.locator(fallback_selector).all()
+                    logger.debug(f"Fallback selector found {len(buttons)} buttons", step="get_button")
+                    
+                    for button in buttons:
+                        try:
+                            text = button.text_content(timeout=2000)
+                            if text and "Easy Apply" in text:
+                                logger.debug(f"Found Easy Apply button with fallback: {text.strip()}", step="get_button")
+                                return button
+                        except:
+                            continue
+                except Exception as e:
+                    logger.debug(f"Fallback selector didn't find button: {e}", step="get_button")
+            
+            # Try text-based selector as last resort
+            try:
+                logger.debug("Trying text-based selector", step="get_button")
+                button = self.page.get_by_role("button", name="Easy Apply").first
+                if button.is_visible(timeout=2000):
+                    logger.debug("Found Easy Apply button with text selector", step="get_button")
                     return button
+            except Exception as e:
+                logger.debug(f"Text-based selector didn't find button: {e}", step="get_button")
             
-            logger.debug("Easy Apply button not found", step="get_button")
+            # Debug: Try to find ANY button with "Easy Apply" in text
+            try:
+                logger.debug("Searching for any button containing 'Easy Apply' text...", step="get_button")
+                all_buttons = self.page.locator("button").all()
+                for i, btn in enumerate(all_buttons[:30]):  # Check first 30 buttons
+                    try:
+                        text = btn.text_content(timeout=1000)
+                        if text and "Easy Apply" in text:
+                            logger.debug(f"Found button with Easy Apply text at index {i}: {text.strip()}", step="get_button")
+                            # Get its attributes
+                            btn_id = btn.get_attribute("id", timeout=1000)
+                            btn_class = btn.get_attribute("class", timeout=1000)
+                            logger.debug(f"  ID: {btn_id}, Class: {btn_class}", step="get_button")
+                            return btn
+                    except:
+                        continue
+            except Exception as e:
+                logger.debug(f"Manual search failed: {e}", step="get_button")
+            
+            logger.debug("Easy Apply button not found after all attempts", step="get_button")
             return False
+            
         except Exception as e:
             if self.metrics:
                 self.metrics.increment("failed")
@@ -163,6 +345,17 @@ class Workflow:
                         except:
                             pass
 
+                # FILL FORM FIELDS FIRST (before clicking buttons)
+                logger.debug("Attempting to fill form fields...", job_id=jobID, step="fill_form")
+                if hasattr(self.form_filler, 'fill_all_fields'):
+                    # SmartFormFiller
+                    self.form_filler.fill_all_fields()
+                else:
+                    # Old FormFiller (fallback)
+                    pass
+                
+                time.sleep(1)  # Let fields settle
+
                 # Check for submit button
                 if len(self.get_elements("submit")) > 0:
                     elements = self.get_elements("submit")
@@ -174,45 +367,80 @@ class Workflow:
                             logger.info("Fake success for dry run", job_id=jobID, step="submit", event="dry_run_success")
                             break
                         
+                        # Click submit
                         element.click()
-                        logger.info("Application Submitted", job_id=jobID, step="submit", event="success")
-                        submitted = True
-                        if self.metrics:
-                            self.metrics.increment("submitted")
+                        logger.info("Clicked Submit button", job_id=jobID, step="submit")
+                        
+                        # CRITICAL: VERIFY SUBMISSION - Wait longer and check thoroughly!
+                        logger.info("⏳ Verifying submission...", job_id=jobID, step="submit")
+                        time.sleep(4)  # Wait longer for LinkedIn response
+                        
+                        # Check if errors appeared after submit
+                        if len(self.get_elements("error")) > 0:
+                            logger.warning("⚠️ Submit failed - errors appeared", job_id=jobID, step="submit")
+                            submitted = False
+                            break  # Continue to error handling
+                        
+                        # Check if modal is still visible (multiple ways)
+                        modal_gone = False
+                        try:
+                            # Method 1: Check if Easy Apply modal disappeared
+                            if not self.is_present(".jobs-easy-apply-modal"):
+                                modal_gone = True
+                            
+                            # Method 2: Check if submit button disappeared
+                            if not self.is_present("button[aria-label='Submit application']"):
+                                modal_gone = True
+                            
+                            # Method 3: Look for success confirmation
+                            if self.is_present(".artdeco-modal__content"):
+                                content = self.page.locator(".artdeco-modal__content").first.text_content(timeout=2000)
+                                if "application" in content.lower() and "sent" in content.lower():
+                                    modal_gone = True
+                                    logger.info("✅ Success confirmation found", job_id=jobID, step="submit")
+                        except:
+                            pass
+                        
+                        if modal_gone:
+                            logger.info("✅ Application Submitted Successfully!", job_id=jobID, step="submit", event="success")
+                            submitted = True
+                            if self.metrics:
+                                self.metrics.increment("submitted")
+                            
+                            # WAIT for modal to fully close before moving on
+                            time.sleep(2)
+                            break
+                        else:
+                            # Modal still open - might be more pages or error
+                            logger.warning("⚠️ Modal still open after submit - might need more pages", job_id=jobID, step="submit")
+                            submitted = False
+                        
                         break
                     
                     if submitted:
-                        break  # Exit the WHILE loop immediately
+                        break  # Exit the WHILE loop
 
                 # Check for errors
                 elif len(self.get_elements("error")) > 0:
                     logger.warning("⚠️ Form contains errors or missing required fields.", job_id=jobID, step="form_error")
                     
-                    # Try to solve automatically first
-                    logger.info("Attempting to auto-solve questions...", job_id=jobID, step="auto_solve")
-                    self.form_filler.process_questions()
+                    # Fill fields again - maybe something was missed
+                    logger.info("Re-attempting to fill fields...", job_id=jobID, step="retry_fill")
+                    if hasattr(self.form_filler, 'fill_all_fields'):
+                        self.form_filler.fill_all_fields()
                     
                     time.sleep(2)
                     
-                    # Check if errors still exist
+                    # AUTO-SKIP: Instead of pausing and waiting for user input, skip this job
+                    # This reduces manual work and keeps the bot running.
                     if len(self.get_elements("error")) > 0:
-                        logger.info("🛑 PAUSED: Bot cannot solve these questions. PLEASE SOLVE THEM MANUALLY.", 
-                                   job_id=jobID, step="manual_intervention")
-                        logger.info("⏰ I will wait indefinitely until you clear the errors. You can take as much time as you need.", 
-                                   job_id=jobID, step="waiting")
+                        logger.warning("🛑 Form still has errors after retry. Skipping this job to keep automation running.", 
+                                   job_id=jobID, step="auto_skip")
                         
-                        # Wait forever until errors are cleared
-                        while len(self.get_elements("error")) > 0:
-                            time.sleep(5)
-                            # Check if the job was closed or we navigated away
-                            if "You applied on" in self.page.content() or "application was sent" in self.page.content():
-                                break
-                            if self.is_present(get_locator("easy_apply_button")):
-                                break
-                        
-                        logger.info("✅ Errors cleared! Resuming...", job_id=jobID, step="resuming")
+                        # Note: close_modal() is called in apply_to_job() so we just break here
+                        break 
                     
-                    continue  # Try the page again
+                    continue  # Try the page again if errors were potentially fixed
 
                 # Check for next button
                 elif len(self.get_elements("next")) > 0:
@@ -220,6 +448,8 @@ class Workflow:
                     for element in elements:
                         element.wait_for(state="visible", timeout=5000)
                         element.click()
+                        logger.info("Clicked Next button", job_id=jobID, step="next")
+                        break
 
                 # Check for review button
                 elif len(self.get_elements("review")) > 0:
@@ -227,6 +457,8 @@ class Workflow:
                     for element in elements:
                         element.wait_for(state="visible", timeout=5000)
                         element.click()
+                        logger.info("Clicked Review button", job_id=jobID, step="review")
+                        break
 
                 # Check for follow button (alternative location)
                 elif len(self.get_elements("follow")) > 0:
@@ -234,8 +466,34 @@ class Workflow:
                     for element in elements:
                         element.wait_for(state="visible", timeout=5000)
                         element.click()
+                        logger.info("Clicked Follow button", job_id=jobID, step="follow")
+                        break
+                
+                else:
+                    # No buttons found - might be done or stuck
+                    logger.warning(f"⚠️ No Next/Review/Submit buttons found (loop {loop})", job_id=jobID, step="no_action")
+                    
+                    # Check if we're actually done
+                    if not self.is_present(".jobs-easy-apply-modal"):
+                        logger.info("Modal closed - application likely complete", job_id=jobID, step="complete")
+                        submitted = True
+                        break
+                    
+                    # Check if there are unfilled fields
+                    if self.is_present(".jobs-easy-apply-form-section__grouping"):
+                        logger.warning("Form fields still present but no buttons - might need manual intervention", job_id=jobID)
                 
                 loop += 1  # Avoid infinite loop if stuck
+                
+                # Log progress every 5 loops
+                if loop % 5 == 0:
+                    logger.info(f"Application loop iteration {loop}/20", job_id=jobID, step="progress")
+
+            # Loop completed without submission
+            if not submitted:
+                logger.warning(f"⚠️ Loop completed ({loop} iterations) without successful submission", job_id=jobID, step="incomplete")
+                if self.metrics:
+                    self.metrics.increment("failed")
 
         except Exception as e:
             logger.error(f"Cannot apply to this job: {e}", job_id=jobID, step="apply_loop", exception=e)

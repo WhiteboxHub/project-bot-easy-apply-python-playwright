@@ -76,33 +76,80 @@ class Search:
                             jobs_per_page = self.next_jobs_page(position, location, jobs_per_page)
                             continue
                 
+                
                 # Extract jobs
                 links_selector = get_locator("links")
+                logger.debug(f"Using job card selector: {links_selector}", step="job_search")
+                
                 if self.is_present(links_selector):
-                    links = self.page.locator(links_selector).all()
+                    # Wait a bit for job cards to fully load
+                    time.sleep(random.uniform(1, 2))
                     
-                    for link in links:
+                    links = self.page.locator(links_selector).all()
+                    logger.info(f"Found {len(links)} job cards on page", step="job_search", event="cards_found")
+                    
+                    if len(links) == 0:
+                        # Try fallback selector
+                        fallback_selector = get_locator("links", use_fallback=True)
+                        logger.warning(f"No cards with primary selector, trying fallback: {fallback_selector}", step="job_search")
+                        if fallback_selector:
+                            links = self.page.locator(fallback_selector).all()
+                            logger.info(f"Fallback found {len(links)} job cards", step="job_search", event="cards_found_fallback")
+                    
+                    for i, link in enumerate(links):
                         try:
+                            # Check if element is visible before processing
+                            if not link.is_visible():
+                                continue
+                            
                             job_id = JobIdentity.extract_job_id(link)
                             if job_id and not scroll_tracker.is_processed(job_id):
-                                link_text = link.text_content()
+                                try:
+                                    link_text = link.text_content(timeout=3000)
+                                except:
+                                    link_text = ""
+                                
                                 if 'Applied' not in link_text:
                                     if link_text not in self.blacklist:
                                         logger.info(f"Found new job: {job_id}", step="job_search", event="found_job")
+                                        
+                                        # CRITICAL: Click the job card to show preview panel
+                                        # Don't click the title link, click the card container
+                                        try:
+                                            # Click on the job card div, NOT the title link
+                                            # This shows the preview panel with Easy Apply button
+                                            link.click(timeout=5000, force=False)
+                                            logger.debug(f"Clicked job card {job_id} to show preview", step="job_search")
+                                            time.sleep(1.5)  # Wait for preview panel to load
+                                        except Exception as click_err:
+                                            logger.warning(f"Could not click job card: {click_err}", step="job_search")
+                                        
                                         self.workflow.apply_to_job(job_id, self.phone_number)
                                         scroll_tracker.add_job(job_id)
                                     else:
+                                        logger.info(f"Skipping blacklisted job: {job_id}", step="job_search", event="blacklisted")
                                         scroll_tracker.add_job(job_id)  # Blacklisted but processed
                                 else:
+                                    logger.debug(f"Already applied to job: {job_id}", step="job_search", event="already_applied")
                                     scroll_tracker.add_job(job_id)  # Already applied
+                            elif job_id:
+                                logger.debug(f"Job {job_id} already processed", step="job_search", event="duplicate")
                         except Exception as e:
-                            logger.warning(f"Error processing job card: {e}", step="job_search", event="card_error")
+                            logger.warning(f"Error processing job card {i}: {e}", step="job_search", event="card_error")
                             continue
                     
                     if scroll_tracker.should_stop():
                         jobs_per_page = self.next_jobs_page(position, location, jobs_per_page)
 
                 else:
+                    logger.warning(f"No job cards found with selector: {links_selector}", step="job_search", event="no_cards")
+                    # Debug: print what elements are on the page
+                    try:
+                        all_divs = self.page.locator("div").count()
+                        all_lis = self.page.locator("li").count()
+                        logger.debug(f"Page has {all_divs} divs and {all_lis} list items", step="job_search")
+                    except:
+                        pass
                     jobs_per_page = self.next_jobs_page(position, location, jobs_per_page)
 
             except Exception as e:
@@ -114,9 +161,11 @@ class Search:
         experience_level_str = ",".join(map(str, self.experience_level)) if self.experience_level else ""
         experience_level_param = f"&f_E={experience_level_str}" if experience_level_str else ""
         
-        url = ("https://www.linkedin.com/jobs/search/?f_LF=f_AL&keywords=" +
+        # Correct Easy Apply filter: f_AL=true
+        url = ("https://www.linkedin.com/jobs/search/?f_AL=true&keywords=" +
                position + location + "&start=" + str(jobs_per_page) + experience_level_param)
         
+        logger.info(f"Loading jobs page: {url[:100]}...", step="next_jobs_page")
         self.page.goto(url, wait_until="domcontentloaded")
         self.load_page()
         return jobs_per_page + 25
@@ -126,6 +175,9 @@ class Search:
         """
         Scroll the page to load all content
         """
+        # Wait for initial page load
+        time.sleep(2)
+        
         scroll_page = 0
         while scroll_page < 4000:
             self.page.evaluate(f"window.scrollTo(0, {scroll_page})")
@@ -135,6 +187,9 @@ class Search:
         if sleep != 1:
             self.page.evaluate("window.scrollTo(0, 0)")
             time.sleep(sleep)
+        
+        # Extra wait for job cards to render
+        time.sleep(2)
 
         return BeautifulSoup(self.page.content(), "lxml")
 

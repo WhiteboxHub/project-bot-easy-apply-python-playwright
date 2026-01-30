@@ -1,5 +1,5 @@
 # Playwright locator strings
-# Playwright uses unified selector syntax - CSS, XPath, text, etc.
+# Optimized for Playwright's unified selector syntax
 
 LOCATORS = {
     "next": {
@@ -48,8 +48,8 @@ LOCATORS = {
     },
     
     "links": {
-        "primary": "div[data-job-id]",
-        "fallback": "div.job-card-container"
+        "primary": "div.job-card-container",
+        "fallback": "li.jobs-search-results__list-item, div.scaffold-layout__list-item"
     },
     
     "fields": {
@@ -78,8 +78,8 @@ LOCATORS = {
     },
     
     "easy_apply_button": {
-        "primary": "button.jobs-apply-button",
-        "fallback": "button[aria-label*='Easy Apply']"
+        "primary": "#jobs-apply-button-id",
+        "fallback": "button.jobs-apply-button, button[aria-label*='Easy Apply']"
     }
 }
 

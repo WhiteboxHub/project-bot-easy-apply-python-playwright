@@ -1,4 +1,5 @@
 import time
+import random
 from bot.utils.logger import logger
 from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError
 
@@ -47,4 +48,3 @@ class Session:
         except Exception as e:
             logger.error(f"Login failed: {e}", step="login", event="failure", exception=e)
 
-import random
