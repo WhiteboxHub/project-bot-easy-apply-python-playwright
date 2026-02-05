@@ -1,0 +1,43 @@
+# Example Legacy Configuration
+# Copy this to config.yaml and fill in your details
+
+username: "your_email@example.com"
+password: "your_password"
+phone_number: "your_phone_number"
+
+profile_path: './linkedin_profile'
+
+# Optional: Proxy configuration
+# Single proxy
+proxy:
+  server: 'http://proxy.example.com:8080'
+  username: 'your_user'
+  password: 'your_password'
+
+# OR Proxy pool (will rotate)
+# proxies:
+#   - server: 'http://p1.example.com:8080'
+#   - server: 'http://p2.example.com:8080'
+
+positions:
+- Software Engineer
+
+locations:
+- Remote
+
+execution:
+  max_applications_per_run: 50
+  cooldown_seconds: 5
+  dry_run: true
+
+salary: 100,000
+rate: 25
+
+uploads:
+  Resume: ./assets/resume.pdf
+  Cover Letter: ./assets/cover_letter.pdf
+
+experience_level:
+  - 1  # Entry level
+  - 2  # Associate
+  - 3  # Mid-Senior level

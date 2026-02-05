@@ -205,3 +205,28 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# --- LinkedIn Bot Custom Ignores ---
+.env
+config.yaml
+config/candidates.yaml
+data/*
+!data/.gitkeep
+assets/**/*.pdf
+assets/candidates/
+archive/
+.DS_Store
+Thumbs.db
+*.log
+data/bot_data.duckdb
+data/*.csv
+data/*.bak
+assets/*.pdf
+# Browser profiles (contain sensitive session data)
+profiles/
+linkedin_profile/
+
+# Debug and Recordings
+videos/
+debug/
+screenshots/
