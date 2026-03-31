@@ -455,6 +455,21 @@ class Workflow:
         except:
             return False
 
+    def has_visible_errors(self):
+        """Safely check if there are any visible form errors (prevents detach exceptions during redirects)"""
+        try:
+            for e in self.get_elements("error"):
+                try:
+                    if e.is_visible():
+                        return True
+                except Exception:
+                    # Ignore individual detached elements
+                    continue
+        except Exception:
+            # If nodes detach mid-check, the page shifted (usually a success state)
+            pass
+        return False
+
     @retry(max_attempts=5, delay=1)
     def send_resume(self, jobID=None, start_time=None) -> bool:
         """
@@ -557,8 +572,7 @@ class Workflow:
                         time.sleep(4)
                         
                         # Check if errors appeared after submit (RARE - would mean form error)
-                        error_elements = self.get_elements("error")
-                        has_errors = any(e.is_visible() for e in error_elements)
+                        has_errors = self.has_visible_errors()
                         if has_errors:
                             logger.warning("⚠️ Form errors after submit button click", job_id=jobID, step="submit")
                             self.store.record_submission_failure(jobID, "Form errors after clicking submit", candidate_id)
@@ -612,7 +626,7 @@ class Workflow:
                         break  # Exit the WHILE loop
 
                 # Check for errors
-                elif any(e.is_visible() for e in self.get_elements("error")):
+                elif self.has_visible_errors():
                     logger.warning("⚠️ Form contains errors or missing required fields.", job_id=jobID, step="form_error")
                     
                     # Fill fields again - maybe something was missed
@@ -624,7 +638,7 @@ class Workflow:
                     
                     # AUTO-SKIP: Instead of pausing and waiting for user input, skip this job
                     # This reduces manual work and keeps the bot running.
-                    if any(e.is_visible() for e in self.get_elements("error")):
+                    if self.has_visible_errors():
                         logger.warning("🛑 Form still has errors after retry. Skipping this job to keep automation running.", 
                                    job_id=jobID, step="auto_skip")
                         

@@ -16,10 +16,9 @@ LOCATORS = {
         "primary": "button[aria-label='Submit application']",
         "fallback": "//button[contains(text(), 'Submit')]"
     },
-    
     "error": {
-        "primary": ".artdeco-inline-feedback__message",
-        "fallback": ".artdeco-inline-feedback"
+        "primary": ".artdeco-inline-feedback--error",
+        "fallback": ".jobs-easy-apply-form-element--error, [data-test-form-element-error-message]"
     },
     
     "upload_resume": {
