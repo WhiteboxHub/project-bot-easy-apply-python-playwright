@@ -534,7 +534,8 @@ class Workflow:
                         time.sleep(4)
                         
                         # Check if errors appeared after submit (RARE - would mean form error)
-                        has_errors = len(self.get_elements("error")) > 0
+                        error_elements = self.get_elements("error")
+                        has_errors = any(e.is_visible() for e in error_elements)
                         if has_errors:
                             logger.warning("⚠️ Form errors after submit button click", job_id=jobID, step="submit")
                             self.store.record_submission_failure(jobID, "Form errors after clicking submit", candidate_id)
@@ -577,8 +578,6 @@ class Workflow:
                         )
                         
                         submitted = True
-                        if self.metrics:
-                            self.metrics.increment("submitted")
                         
                         # WAIT for modal to fully close before moving on
                         time.sleep(2)
@@ -590,7 +589,7 @@ class Workflow:
                         break  # Exit the WHILE loop
 
                 # Check for errors
-                elif len(self.get_elements("error")) > 0:
+                elif any(e.is_visible() for e in self.get_elements("error")):
                     logger.warning("⚠️ Form contains errors or missing required fields.", job_id=jobID, step="form_error")
                     
                     # Fill fields again - maybe something was missed
@@ -602,7 +601,7 @@ class Workflow:
                     
                     # AUTO-SKIP: Instead of pausing and waiting for user input, skip this job
                     # This reduces manual work and keeps the bot running.
-                    if len(self.get_elements("error")) > 0:
+                    if any(e.is_visible() for e in self.get_elements("error")):
                         logger.warning("🛑 Form still has errors after retry. Skipping this job to keep automation running.", 
                                    job_id=jobID, step="auto_skip")
                         
@@ -675,5 +674,8 @@ class Workflow:
 
         if submitted and self.execution_guard:
             self.execution_guard.on_success()
+            
+        if submitted and self.metrics:
+            self.metrics.increment("submitted")
 
         return submitted

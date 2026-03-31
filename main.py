@@ -344,6 +344,7 @@ if __name__ == '__main__':
             send_job_activity_log(
                 candidate_id=wbl_candidate_id,
                 notes=notes,
+                activity_count=metrics.submitted,
                 job_id=146
             )
         else:

@@ -3,7 +3,7 @@ import requests
 from datetime import datetime
 from bot.utils.logger import logger
 
-def send_job_activity_log(candidate_id: int, notes: str, job_id: int = 146):
+def send_job_activity_log(candidate_id: int, notes: str, activity_count: int = 0, job_id: int = 146):
     """
     Sends a bulk job activity log to the Whitebox Learning API.
     """
@@ -44,13 +44,15 @@ def send_job_activity_log(candidate_id: int, notes: str, job_id: int = 146):
     
     log_endpoint = f"{base_url}/job_activity_logs/bulk"
     
-    # Formatting the payload based on standard job activity log expectations
+    # Formatting the payload based on exact job_activity_log DB schema
     payload = {
         "logs": [
             {
                 "job_id": job_id,
                 "candidate_id": candidate_id,
                 "employee_id": int(employee_id) if employee_id and employee_id.isdigit() else employee_id,
+                "activity_date": datetime.utcnow().date().isoformat(),
+                "activity_count": activity_count,
                 "status": "applied",
                 "notes": notes,
                 "activity_type": "Auto-Applied via Bot"
