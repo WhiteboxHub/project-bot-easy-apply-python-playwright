@@ -5,6 +5,7 @@ candidates:
   - id: candidate_001
     name: "Full Name"
     enabled: true
+    wbl_candidate_id: 12345  # Add your WBL platform candidate ID here for activity logging
     credentials:
       email: "your_email@example.com"
       password: ""  # Leave empty to use .env
@@ -41,7 +42,7 @@ candidates:
     preferences:
       max_applications_per_run: 50
       cooldown_seconds: 5
-      dry_run: true
+      dry_run: false
     schedule:
       enabled: false
       cron: "0 9 * * 1-5"
