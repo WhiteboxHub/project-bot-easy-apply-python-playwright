@@ -3,18 +3,18 @@
 #project-bot-easy-apply-python-playwright\bot\utils\selectors.py
 LOCATORS = {
     "next": {
-        "primary": "button[aria-label='Continue to next step']",
-        "fallback": "//button[contains(text(), 'Next') or contains(text(), 'Continue')]"
+        "primary": "button[aria-label='Continue to next step'], button[aria-label*='next step'], button[aria-label*='Continue']",
+        "fallback": "button.artdeco-button--primary:has-text('Next'), button.artdeco-button--primary:has-text('Continue'), //button[contains(., 'Next') or contains(., 'Continue')]"
     },
     
     "review": {
-        "primary": "button[aria-label='Review your application']",
-        "fallback": "//button[contains(text(), 'Review')]"
+        "primary": "button[aria-label='Review your application'], button[aria-label*='Review']",
+        "fallback": "button.artdeco-button--primary:has-text('Review'), //button[contains(., 'Review')]"
     },
     
     "submit": {
-        "primary": "button[aria-label='Submit application']",
-        "fallback": "//button[contains(text(), 'Submit')]"
+        "primary": "button[aria-label='Submit application'], button[aria-label*='Submit application'], button[aria-label*='Submit your application']",
+        "fallback": "button.artdeco-button--primary:has-text('Submit'), button[type='submit']:has-text('Submit'), //button[contains(., 'Submit')]"
     },
     "error": {
         "primary": ".artdeco-inline-feedback--error",
@@ -77,8 +77,8 @@ LOCATORS = {
     },
     
     "easy_apply_button": {
-        "primary": "#jobs-apply-button-id",
-        "fallback": "button.jobs-apply-button, button[aria-label*='Easy Apply'], button[aria-label*='Continue applying']"
+        "primary": "#jobs-apply-button-id, button#jobs-apply-button-id, button.jobs-apply-button",
+        "fallback": "button.jobs-apply-button, button[aria-label*='LinkedIn Apply to'], button[aria-label*='Apply to'], button[aria-label*='Easy Apply'], button[aria-label*='Continue applying']"
     }
 }
 

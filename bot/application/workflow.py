@@ -14,12 +14,16 @@ from bot.utils.human_interaction import HumanInteraction
 
 
 class Workflow:
-    def __init__(self, page: Page, uploads, blacklist_titles=None, execution_guard=None, dry_run=None, metrics=None, candidate_profile=None):
+    def __init__(self, page: Page, uploads, blacklist_titles=None, execution_guard=None, dry_run=None, metrics=None, candidate_profile=None, review_mode=False):
         self.page = page
         self.uploads = uploads
         self.blacklist_titles = blacklist_titles or []
         self.store = Store()
         self.candidate_profile = candidate_profile
+        self.review_mode = review_mode
+        self.metrics = metrics
+        self.dry_run = dry_run
+        self.execution_guard = execution_guard
         
         # Use SmartFormFiller if candidate profile provided, otherwise old FormFiller
         if candidate_profile:
@@ -371,7 +375,7 @@ class Workflow:
                 for button in buttons:
                     try:
                         text = button.text_content(timeout=2000)
-                        if text and ("Easy Apply" in text or "Continue" in text):
+                        if text and ("Apply" in text or "Continue" in text):
                             logger.debug(f"Found Apply button: {text.strip()}", step="get_button")
                             return button
                     except:
@@ -391,7 +395,7 @@ class Workflow:
                     for button in buttons:
                         try:
                             text = button.text_content(timeout=2000)
-                            if text and ("Easy Apply" in text or "Continue" in text):
+                            if text and ("Apply" in text or "Continue" in text):
                                 logger.debug(f"Found Apply button with fallback: {text.strip()}", step="get_button")
                                 return button
                         except:
@@ -402,7 +406,7 @@ class Workflow:
             # Try text-based selector as last resort
             try:
                 logger.debug("Trying text-based selector", step="get_button")
-                button = self.page.get_by_role("button", name=re.compile("Easy Apply|Continue", re.I)).first
+                button = self.page.get_by_role("button", name=re.compile("Apply|Continue", re.I)).first
                 if button.is_visible(timeout=2000):
                     logger.debug("Found apply button with text selector", step="get_button")
                     return button
@@ -647,6 +651,44 @@ class Workflow:
                     
                     continue  # Try the page again if errors were potentially fixed
 
+                # Check for SUBMIT button
+                elif self.is_present(get_locator("submit")) or self.is_present(get_locator("submit", use_fallback=True)):
+                    # REVIEW STEP: If review mode is on, wait for user BEFORE clicking
+                    if self.review_mode:
+                        logger.info("⏸️ Application ready for review. Waiting for user confirmation in browser...", job_id=jobID, step="submit")
+                        if not self._wait_for_submit_confirmation(jobID):
+                            logger.warning("⏭️ User skipped/cancelled submission", job_id=jobID, step="submit")
+                            submitted = False
+                            break
+                    
+                    # ACTION: Click Submit
+                    if self.dry_run and not self.dry_run.validate_submit():
+                        submitted = True
+                        logger.info("Fake success for dry run", job_id=jobID, step="submit", event="dry_run_success")
+                        break
+                    
+                    if self._click_submit_button(jobID):
+                        # CRITICAL: VERIFY SUBMISSION
+                        logger.info("⏳ Verifying submission...", job_id=jobID, step="submit")
+                        time.sleep(4)
+                        
+                        # Check for success using multiple indicators
+                        if self._verify_submission(jobID):
+                            logger.info("✅ Application Submitted Successfully!", job_id=jobID, step="submit", event="success")
+                            submitted = True
+                            if self.metrics:
+                                self.metrics.increment("submitted")
+                            time.sleep(2)
+                            break
+                        else:
+                            logger.warning("⚠️ Submission could not be verified (might still be on form)", job_id=jobID, step="submit")
+                            submitted = False
+                    else:
+                        logger.error("❌ Failed to click Submit button even after finding it", job_id=jobID, step="submit")
+                        submitted = False
+                    
+                    if submitted:
+                        break
 
                 # Check for next button
                 elif len(self.get_elements("next")) > 0:
@@ -716,3 +758,126 @@ class Workflow:
             self.metrics.increment("submitted")
 
         return submitted
+
+    def _click_submit_button(self, jobID) -> bool:
+        """Robustly find and click the LinkedIn 'Submit application' button"""
+        try:
+            selectors = [
+                get_locator("submit"),                         
+                get_locator("submit", use_fallback=True),      
+                "button:has-text('Submit application')",      
+                "button[type='submit']",                       
+                "footer button.artdeco-button--primary"        
+            ]
+
+            for selector in selectors:
+                try:
+                    btn = self.page.locator(selector).visible().first
+                    if btn.count() > 0:
+                        btn.click()
+                        logger.info(f"Clicked Submit button using selector: {selector}", job_id=jobID)
+                        if self.metrics:
+                            self.metrics.increment("submit_clicks")
+                        return True
+                except:
+                    continue
+
+            try:
+                btn = self.page.get_by_role("button", name=re.compile("Submit application|Submit", re.I)).visible().first
+                if btn.count() > 0:
+                    btn.click()
+                    logger.info("Clicked Submit button using Role API", job_id=jobID)
+                    if self.metrics:
+                        self.metrics.increment("submit_clicks")
+                    return True
+            except:
+                pass
+
+            return False
+        except Exception as e:
+            logger.error(f"Error clicking submit: {e}", job_id=jobID)
+            return False
+
+    def _verify_submission(self, jobID) -> bool:
+        """Thoroughly check if the application was actually sent"""
+        try:
+            success_confirmations = ["sent", "successfully", "done", "submitted", "received", "thanks"]
+            if self.is_present(".artdeco-modal__content"):
+                content = self.page.locator(".artdeco-modal__content").first.text_content(timeout=3000).lower()
+                if any(word in content for word in success_confirmations):
+                    return True
+
+            if self.is_present("h2:has-text('Application sent')") or self.is_present("h2:has-text('successfully')"):
+                return True
+
+            if not self.is_present(".jobs-easy-apply-modal") and not self.is_present(get_locator("error")):
+                return True
+
+            return False
+        except:
+            return False
+
+    def _wait_for_submit_confirmation(self, jobID) -> bool:
+        """Display a sleek top-bar banner to review and confirm submission, matching question style."""
+        try:
+            self.page.evaluate("""(jobID) => { 
+                // Reset flags
+                window.bot_submit_confirmed = false;
+                window.bot_submit_skipped = false;
+
+                // Create Modern Floating Banner (Sleek Top Bar)
+                const banner = document.createElement('div');
+                banner.id = 'bot-review-banner';
+                banner.style.cssText = 'position: fixed; top: 20px; left: 50%; transform: translateX(-50%); background: #1a1a1a; color: white; padding: 12px 25px; border-radius: 12px; z-index: 999999; box-shadow: 0 10px 30px rgba(0,0,0,0.5); font-family: -apple-system, system-ui, sans-serif; display: flex; align-items: center; gap: 20px; border: 1px solid #ff4500; min-width: 400px; animation: slideDown 0.4s ease-out;';
+                
+                const style = document.createElement('style');
+                style.innerHTML = `@keyframes slideDown { from { transform: translate(-50%, -100%); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }`;
+                document.head.appendChild(style);
+
+                const text = document.createElement('div');
+                text.innerHTML = `<span style="color: #ff4500; font-weight: bold; font-size: 14px; display: block;">🚀 READY TO SUBMIT?</span> <span style="font-size: 13px; color: #ccc;">Please review details for Job ${jobID}</span>`;
+                text.style.flex = '1';
+                
+                const btnContainer = document.createElement('div');
+                btnContainer.style.display = 'flex';
+                btnContainer.style.gap = '10px';
+
+                // Proceed Button
+                const proceedBtn = document.createElement('button');
+                proceedBtn.textContent = '✅ Proceed';
+                proceedBtn.style.cssText = 'background: #ff4500; color: white; border: none; padding: 8px 18px; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 13px; transition: 0.2s;';
+                proceedBtn.onclick = () => { window.bot_submit_confirmed = true; banner.style.opacity = '0.5'; banner.innerText = '⌛ Submitting...'; };
+
+                // Skip Button
+                const skipBtn = document.createElement('button');
+                skipBtn.textContent = '⏭️ Skip';
+                skipBtn.style.cssText = 'background: #333; color: white; border: none; padding: 8px 15px; border-radius: 8px; cursor: pointer; font-size: 12px;';
+                skipBtn.onclick = () => { window.bot_submit_skipped = true; banner.remove(); };
+
+                btnContainer.appendChild(skipBtn);
+                btnContainer.appendChild(proceedBtn);
+                banner.appendChild(text);
+                banner.appendChild(btnContainer);
+                document.body.appendChild(banner);
+            }""", jobID)
+
+            print(f"\n" + "!"*60)
+            print(f"🚀 REVIEW REQUIRED for Job {jobID}")
+            print(f"👉 Application is filled. Please review and click 'Proceed' in the browser.")
+            print("!"*60 + "\n")
+
+            while True: 
+                is_confirmed = self.page.evaluate("() => window.bot_submit_confirmed")
+                is_skipped = self.page.evaluate("() => window.bot_submit_skipped")
+
+                if is_confirmed:
+                    self.page.evaluate("() => { const b = document.getElementById('bot-review-banner'); if(b) b.remove(); }")
+                    return True
+                if is_skipped:
+                    return False
+                time.sleep(0.5)
+            return False
+
+        except Exception as e:
+            logger.error(f"Error in review banner: {e}")
+            return True
