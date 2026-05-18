@@ -9,4 +9,4 @@ result = con.execute("""
     GROUP BY candidate_id
     ORDER BY Submitted DESC
 """).fetchdf()
-print(result.to_string(index=False))
+print(result.to_string(index=False)) 
