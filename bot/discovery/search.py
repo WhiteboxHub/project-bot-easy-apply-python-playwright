@@ -283,8 +283,16 @@ class Search:
 
     def _log_results_markup(self, search_selector):
         try:
-            sample = self.page.locator(search_selector).first.evaluate(
-                """root => {
+            search_selectors = [
+                selector
+                for selector in (
+                    search_selector,
+                    get_locator("search", use_fallback=True),
+                )
+                if selector
+            ]
+            sample = self.page.evaluate(
+                """selectors => {
                     const summarize = element => ({
                         tag: element.tagName.toLowerCase(),
                         className: typeof element.className === 'string' ? element.className.slice(0, 160) : '',
@@ -297,20 +305,36 @@ class Search:
                         text: (element.innerText || element.textContent || '')
                             .replace(/\\s+/g, ' ').trim().slice(0, 140)
                     });
-                    const descendants = Array.from(root.querySelectorAll(
+                    let root = null;
+                    let matchedSelector = null;
+                    for (const selector of selectors) {
+                        try {
+                            root = document.querySelector(selector);
+                            if (root) {
+                                matchedSelector = selector;
+                                break;
+                            }
+                        } catch (error) {
+                            continue;
+                        }
+                    }
+                    const scope = root || document.body;
+                    const descendants = Array.from(scope.querySelectorAll(
                         ':scope > *, :scope > * > *, :scope > * > * > *'
                     )).filter(element => (element.innerText || '').trim().length > 0).slice(0, 18);
-                    const anchors = Array.from(root.querySelectorAll('a')).slice(0, 18);
-                    const marked = Array.from(root.querySelectorAll(
+                    const anchors = Array.from(scope.querySelectorAll('a')).slice(0, 18);
+                    const marked = Array.from(scope.querySelectorAll(
                         '[data-job-id], [data-occludable-job-id], [data-entity-urn], [data-view-name], [role="listitem"]'
                     )).slice(0, 18);
                     return {
-                        container: summarize(root),
+                        matchedSelector: matchedSelector,
+                        container: root ? summarize(root) : null,
                         descendants: descendants.map(summarize),
                         anchors: anchors.map(summarize),
                         marked: marked.map(summarize)
                     };
-                }"""
+                }""",
+                search_selectors,
             )
             logger.warning(
                 f"Job results DOM sample: {sample}",
