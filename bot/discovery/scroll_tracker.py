@@ -31,6 +31,10 @@ class ScrollTracker:
             return True
         return False
 
+    def reset(self):
+        self.previous_height = 0
+        self.same_height_count = 0
+
     def add_job(self, job_id):
         self.processed_job_ids.add(job_id)
 

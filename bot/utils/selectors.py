@@ -4,17 +4,17 @@
 LOCATORS = {
     "next": {
         "primary": "button[aria-label='Continue to next step'], button[aria-label*='next step'], button[aria-label*='Continue']",
-        "fallback": "button.artdeco-button--primary:has-text('Next'), button.artdeco-button--primary:has-text('Continue'), //button[contains(., 'Next') or contains(., 'Continue')]"
+        "fallback": "button.artdeco-button--primary:has-text('Next'), button.artdeco-button--primary:has-text('Continue')"
     },
     
     "review": {
         "primary": "button[aria-label='Review your application'], button[aria-label*='Review']",
-        "fallback": "button.artdeco-button--primary:has-text('Review'), //button[contains(., 'Review')]"
+        "fallback": "button.artdeco-button--primary:has-text('Review')"
     },
     
     "submit": {
         "primary": "button[aria-label='Submit application'], button[aria-label*='Submit application'], button[aria-label*='Submit your application']",
-        "fallback": "button.artdeco-button--primary:has-text('Submit'), button[type='submit']:has-text('Submit'), //button[contains(., 'Submit')]"
+        "fallback": "button.artdeco-button--primary:has-text('Submit'), button[type='submit']:has-text('Submit')"
     },
     "error": {
         "primary": ".artdeco-inline-feedback--error",
@@ -47,8 +47,8 @@ LOCATORS = {
     },
     
     "links": {
-        "primary": "div.job-card-container",
-        "fallback": "li.jobs-search-results__list-item, div.scaffold-layout__list-item"
+        "primary": "div.job-card-container, [data-occludable-job-id], [data-job-id], [data-entity-urn*='jobPosting']",
+        "fallback": "li:has-text('Easy Apply'), li.jobs-search-results__list-item, li.scaffold-layout__list-item, li:has(a[href*='/jobs/view/']), div.scaffold-layout__list-item"
     },
     
     "fields": {

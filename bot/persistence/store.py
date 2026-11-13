@@ -319,10 +319,13 @@ class Store:
         """Log granular submission events for debugging and analytics"""
         con = self._get_connection()
         try:
+            event_id = con.execute(
+                "SELECT COALESCE(MAX(event_id), 0) + 1 FROM submission_events"
+            ).fetchone()[0]
             con.execute("""
-                INSERT INTO submission_events (job_id, event_type, details, candidate_id)
-                VALUES (?, ?, ?, ?)
-            """, [job_id, event_type, details, candidate_id])
+                INSERT INTO submission_events (event_id, job_id, event_type, details, candidate_id)
+                VALUES (?, ?, ?, ?, ?)
+            """, [event_id, job_id, event_type, details, candidate_id])
         except Exception as e:
             log.error(f"Failed to log submission event: {e}")
         finally:

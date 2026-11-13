@@ -20,14 +20,16 @@ class Session:
                 return
 
             # Wait for login form
-            self.page.wait_for_selector("#username", timeout=10000)
+            username_selector = "#username, input[name='session_key'], input[autocomplete='username']"
+            self.page.wait_for_selector(username_selector, timeout=10000)
             
             # Fill username
-            self.page.fill("#username", username)
+            self.page.fill(username_selector, username)
             time.sleep(random.uniform(1, 2))
             
             # Fill password
-            self.page.fill("#password", password)
+            password_selector = "#password, input[name='session_password'], input[autocomplete='current-password']"
+            self.page.fill(password_selector, password)
             time.sleep(random.uniform(1, 2))
             
             # Click login button
@@ -43,8 +45,16 @@ class Session:
                 logger.warning("Login may have failed - unexpected URL", step="login", event="warning")
                 
         except PlaywrightTimeoutError:
-            logger.error("TimeoutException! Username/password field or login button not found", 
-                        step="login", event="failure", exception_type="TimeoutException")
+            if "/feed/" in self.page.url:
+                logger.info("Already logged in.", step="login", event="success")
+                return
+            logger.error(
+                f"TimeoutException! Username/password field or login button not found "
+                f"(URL: {self.page.url}, title: {self.page.title()})",
+                step="login",
+                event="failure",
+                exception_type="TimeoutException",
+            )
         except Exception as e:
             logger.error(f"Login failed: {e}", step="login", event="failure", exception=e)
 

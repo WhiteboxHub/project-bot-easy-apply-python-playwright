@@ -49,7 +49,7 @@ candidates:
       learned_answers: {}
     preferences:
       max_applications_per_run: 50
-      cooldown_seconds: 5
+      cooldown_seconds: 2
       dry_run: false
     schedule:
       enabled: false

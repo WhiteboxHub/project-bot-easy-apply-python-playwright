@@ -27,6 +27,16 @@ class JobIdentity:
             except:
                 pass
             
+            # Some LinkedIn layouts expose the job result as a link without a card wrapper.
+            try:
+                href = element.get_attribute("href", timeout=2000)
+                if href and "/jobs/view/" in href:
+                    job_id = href.split("/jobs/view/", 1)[1].split("/", 1)[0].split("?", 1)[0]
+                    if job_id.isdigit():
+                        return job_id
+            except:
+                pass
+
             # Method 3: Try to find job ID in href of child link
             try:
                 link = element.locator("a[href*='/jobs/view/']").first
@@ -57,4 +67,3 @@ class JobIdentity:
         except Exception as e:
             logger.debug(f"Failed to extract job ID: {e}", step="extract_job_id")
             return None
-

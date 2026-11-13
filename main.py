@@ -178,7 +178,7 @@ if __name__ == '__main__':
         blacklist_titles = preferences.get('blacklist_titles', [])
         
         max_apps = preferences.get('max_applications_per_run', 50)
-        cooldown = preferences.get('cooldown_seconds', 5)
+        cooldown = preferences.get('cooldown_seconds', 2)
         is_dry_run = preferences.get('dry_run', False)
         
         # Proxy Setup (Advanced)
@@ -299,7 +299,6 @@ if __name__ == '__main__':
     except Exception as e:
         logger.error(f"Bot encountered an error: {e}", step="shutdown", event="error", exception=e)
     finally:
-        logger.info("Closing browser...", step="shutdown", event="cleanup")
         
         # Save learned answers back to YAML if using candidate profile
         if selected_candidate and hasattr(workflow.form_filler, 'learned_answers'):
@@ -350,5 +349,21 @@ if __name__ == '__main__':
         else:
             logger.warning("No 'wbl_candidate_id' defined in candidate profile. Skipping WBL log.", step="wbl_api")
             
+        if workflow.application_needs_review:
+            logger.warning(
+                "The Easy Apply form needs review and will remain open until you finish reviewing it.",
+                step="shutdown",
+                event="browser_kept_open",
+            )
+            try:
+                input("Finish reviewing the open application, then press Enter to close Chrome...")
+            except EOFError:
+                logger.warning(
+                    "No interactive console is available; closing Chrome.",
+                    step="shutdown",
+                    event="browser_close_no_console",
+                )
+
+        logger.info("Closing browser...", step="shutdown", event="cleanup")
         browser.close()
         logger.info("Bot shutdown complete", step="shutdown", event="complete")
