@@ -402,7 +402,7 @@ class Workflow:
     def _pick_preview_easy_apply_button(self, buttons):
         candidates = []
         viewport_width = (self.page.viewport_size or {}).get("width")
-        preview_min_x = viewport_width * 0.4 if viewport_width else 0
+        preview_min_x = viewport_width * 0.35 if viewport_width else 0
 
         for button in buttons:
             try:
@@ -410,18 +410,34 @@ class Workflow:
                     continue
                 text = " ".join((button.inner_text(timeout=1000) or "").split()).casefold()
                 label = " ".join((button.get_attribute("aria-label") or "").split()).casefold()
-                if text != "easy apply" and "easy apply" not in label:
+                button_id = button.get_attribute("id") or ""
+                class_name = button.get_attribute("class") or ""
+                strong_preview_match = (
+                    button_id == "jobs-apply-button-id"
+                    or "jobs-apply-button" in class_name.split()
+                    or "linkedin apply to" in label
+                )
+                text_match = (
+                    text == "easy apply"
+                    or "easy apply" in label
+                    or "continue applying" in label
+                )
+                if not strong_preview_match and not text_match:
                     continue
                 box = button.bounding_box()
-                if box and box["x"] >= preview_min_x:
-                    candidates.append((box["x"], button))
+                x_position = box["x"] if box else -1
+                if strong_preview_match or x_position >= preview_min_x:
+                    candidates.append((strong_preview_match, x_position, button))
             except Exception:
                 continue
 
         if not candidates:
             return False
 
-        x_position, button = max(candidates, key=lambda candidate: candidate[0])
+        _, x_position, button = max(
+            candidates,
+            key=lambda candidate: (candidate[0], candidate[1]),
+        )
         logger.debug(
             f"Selected Easy Apply button in the job preview pane at x={x_position:.0f}",
             step="get_button",
